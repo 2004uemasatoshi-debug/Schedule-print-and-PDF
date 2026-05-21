@@ -2,27 +2,30 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>手帳リフィルジェネレーター</title>
+    <title>Perfect Notebook Generator (Web版)</title>
     <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+    <script src="https://unpkg.com/@pdf-lib/fontkit/dist/fontkit.umd.js"></script>
     <style>
-        body { font-family: sans-serif; margin: 40px; background: #f5f5f5; color: #333; }
-        .container { max-width: 500px; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        h1 { font-size: 20px; margin-bottom: 20px; }
-        label { display: block; margin-top: 15px; font-weight: bold; }
-        select, input, button { width: 100%; padding: 10px; margin-top: 5px; box-sizing: border-box; border-radius: 4px; border: 1px solid #ccc; }
-        button { background: #007bff; color: white; border: none; font-size: 16px; margin-top: 25px; cursor: pointer; }
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; margin: 40px; background: #f0f2f5; color: #333; display: flex; justify-content: center; }
+        .container { max-width: 480px; width: 100%; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        h1 { font-size: 20px; margin-bottom: 25px; text-align: center; color: #1a1a1a; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        label { display: block; margin-top: 15px; font-weight: bold; font-size: 14px; }
+        select, input, button { width: 100%; padding: 12px; margin-top: 6px; box-sizing: border-box; border-radius: 6px; border: 1px solid #ccc; font-size: 15px; }
+        button { background: #007bff; color: white; border: none; font-weight: bold; margin-top: 30px; cursor: pointer; transition: background 0.2s; }
         button:hover { background: #0056b3; }
+        button:disabled { background: #cccccc; cursor: not-allowed; }
+        .status { margin-top: 15px; font-size: 13px; text-align: center; color: #666; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>📅 手帳リフィル生成 (Web版)</h1>
+    <h1>📅 Perfect Notebook Generator</h1>
 
-    <label for="year">年</label>
-    <input type="number" id="year" value="2026">
+    <label for="year">対象の年 (Year):</label>
+    <input type="number" id="year" value="2026" min="2025" max="2035">
 
-    <label for="month">月</label>
+    <label for="month">対象の月 (Month):</label>
     <select id="month">
         <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
         <option value="4">4月</option><option value="5" selected>5月</option><option value="6">6月</option>
@@ -30,42 +33,388 @@
         <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
     </select>
 
-    <label for="type">タイプ</label>
-    <select id="type">
-        <option value="A4_Print">A4_Print (印刷用)</option>
-        <option value="A3_Digital">A3_Digital (デジタル手帳用)</option>
+    <label for="layout">出力形式 (Layout):</label>
+    <select id="layout">
+        <option value="A4_Print">A4 印刷用</option>
+        <option value="A3_Digital">A3 デジタル</option>
     </select>
 
-    <button onclick="generatePDF()">PDFを生成してダウンロード</button>
+    <button id="genBtn" onclick="startGeneration()">PDFリフィルを生成する</button>
+    <div id="status" class="status">スタンバイ</div>
 </div>
 
 <script>
-    async function generatePDF() {
-        // 1. 画面から入力された値を取得
-        const year = document.getElementById('year').value;
-        const month = document.getElementById('month').value;
-        const type = document.getElementById('type').value;
+    let holidayText = "";
 
-        alert(`${year}年${month}月のリフィル（${type}）を生成します（ロジックはここから追加！）`);
+    // 色定義のユーティリティ (Javaの new Color(r,g,b) を再現)
+    const rgbColor = (r, g, b) => PDFLib.rgb(r / 255, g / 255, b / 255);
 
-        // 2. pdf-lib を使って空のPDFドキュメントを作成
-        const pdfDoc = await PDFLib.PDFDocument.create();
-        const page = pdfDoc.addPage([595.28, 841.89]); // A4サイズ (ポイント単位)
+    // 祝日データの取得 (内閣府のCSVをプロキシ経由、または直接取得を試みる)
+    async function fetchHolidays() {
+        if (holidayText !== "") return;
+        try {
+            // ブラウザのCORS制約を回避するため、パブリックプロキシを経由して内閣府のCSVを読み込みます
+            const response = await fetch("https://api.allorigins.win/raw?url=" + encodeURIComponent("https://www8.cao.go.jp/chosei/shukujitsu/syukujitsu.csv"));
+            const buffer = await response.arrayBuffer();
+            const decoder = new TextDecoder('shift-jis');
+            holidayText = decoder.decode(buffer);
+        } catch (e) {
+            console.error("祝日データの取得に失敗しました。フォールバックします。", e);
+            holidayText = "なし";
+        }
+    }
 
-        // 3. テキストを描画 (※JavaScript標準のフォントを使用)
-        page.drawText(`${year}/${month} Schedule (${type})`, {
-            x: 50,
-            y: 800,
-            size: 24,
-        });
+    function checkHoliday(year, month, day) {
+        if (!holidayText || holidayText === "なし") return false;
+        const t1 = `${year}/${parseInt(month)}/${parseInt(day)},`;
+        const t2 = `${year}/${String(month).padStart(2, '0')}/${String(day).padStart(2, '0')},`;
+        return holidayText.includes(t1) || holidayText.includes(t2);
+    }
 
-        // 4. PDFファイルをバイトデータに変換してブラウザでダウンロードさせる
-        const pdfBytes = await pdfDoc.save();
-        const blob = new Blob([pdfBytes], { type: "application/pdf" });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `schedule_${year}_${month}.pdf`;
-        link.click();
+    // 曜日のインデックスを取得 (月:0, 火:1 ... 日:6)
+    function getDayOfWeekMondayIdx(year, month, day) {
+        const date = new Date(year, month - 1, day);
+        let dayOfWeek = date.getDay(); // 日:0, 月:1 ... 土:6
+        let idx = dayOfWeek - 1;
+        if (idx < 0) idx = 6; // 日曜日を最後に
+        return idx;
+    }
+
+    async function startGeneration() {
+        const btn = document.getElementById('genBtn');
+        const status = document.getElementById('status');
+        btn.disabled = true;
+
+        const year = parseInt(document.getElementById('year').value);
+        const month = parseInt(document.getElementById('month').value);
+        const layout = document.getElementById('layout').value;
+
+        try {
+            status.innerText = "祝日データを読込中...";
+            await fetchHolidays();
+
+            status.innerText = "フォントを読込中...";
+            // 同じ階層に配置した msgothic.ttc をブラウザが直接ロードします！
+            const fontUrl = './src/main/resources/msgothic.ttc';
+            const fontBytes = await fetch(fontUrl).then(res => {
+                if(!res.ok) throw new Error("フォントファイルが見つかりません。パスを確認してください。");
+                return res.arrayBuffer();
+            });
+
+            status.innerText = "PDF生成中...";
+            const pdfDoc = await PDFLib.PDFDocument.create();
+            pdfDoc.registerFontkit(fontkit);
+            // TTCファイルからフォントをインベッド
+            const customFont = await pdfDoc.embedFont(fontBytes, { subset: true });
+
+            let fileName = "";
+            if (layout === "A4_Print") {
+                fileName = `Planner_A4_Print_${year}_${month}.pdf`;
+                await createPrintA4(pdfDoc, customFont, year, month);
+            } else {
+                fileName = `Planner_A3_Digital_${year}_${month}.pdf`;
+                await createDigitalA3(pdfDoc, customFont, year, month);
+            }
+
+            status.innerText = "ダウンロード準備中...";
+            const pdfBytes = await pdfDoc.save();
+            const blob = new Blob([pdfBytes], { type: "application/pdf" });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = fileName;
+            link.click();
+
+            status.innerText = "完了!";
+        } catch (e) {
+            alert("エラーが発生しました: " + e.message);
+            status.innerText = "エラー終了";
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    // --- 共通の横線描画 (30分点線) ---
+    function drawLines(page, font, ox, uw, sy, rh, tw, dw, monthArr) {
+        // pdf-libは左下が原点(0,0)なので、Javaの Y 座標の計算を反転させて調整しています
+        const pageH = page.getHeight();
+
+        for (let r = 0; r <= 48; r++) {
+            const y = (pageH - sy) + 25 + (r * rh); // 上からの距離を逆転
+            const isHr = (r % 2 === 0);
+
+            let strokeColor = isHr ? rgbColor(180, 180, 180) : rgbColor(215, 215, 215);
+            let thickness = isHr ? 0.8 : 0.5;
+            let dashPattern = isHr ? [] : [2, 2];
+
+            // 横線の描画
+            if (tw > 0) {
+                page.drawLine({ start: { x: ox, y: y }, end: { x: ox + tw, y: y }, color: strokeColor, thickness: thickness, dashArray: dashPattern });
+            }
+            for (let i = 0; i < monthArr.length; i++) {
+                if (monthArr[i]) {
+                    const x = ox + tw + (i * dw);
+                    page.drawLine({ start: { x: x, y: y }, end: { x: x + dw, y: y }, color: strokeColor, thickness: thickness, dashArray: dashPattern });
+                }
+            }
+
+            // 時間文字の描画
+            if (tw > 0 && isHr && r < 48) {
+                const hourStr = String(Math.floor(r / 2)).padStart(2, '0') + ":00";
+                page.drawText(hourStr, { x: ox + 4, y: y - 11, size: 8, font: font, color: rgbColor(64, 64, 64) });
+            }
+        }
+
+        // 縦枠線の描画
+        const bY = (pageH - sy) + 25 + (48 * rh);
+        const topY = (pageH - sy);
+
+        page.drawLine({ start: { x: ox, y: topY }, end: { x: ox, y: bY }, color: rgbColor(200, 200, 200), thickness: 0.7 });
+        if (tw > 0) {
+            page.drawLine({ start: { x: ox + tw, y: topY }, end: { x: ox + tw, y: bY }, color: rgbColor(200, 200, 200), thickness: 0.7 });
+        }
+        for (let i = 0; i < monthArr.length; i++) {
+            const x = ox + tw + ((i + 1) * dw);
+            if (monthArr[i] || (i > 0 && monthArr[i - 1])) {
+                page.drawLine({ start: { x: x, y: topY }, end: { x: x, y: bY }, color: rgbColor(200, 200, 200), thickness: 0.7 });
+            }
+        }
+    }
+
+    // --- A4印刷用生成 ---
+    async function createPrintA4(pdfDoc, font, year, month) {
+        // A4サイズ: 595.28 x 841.89 ポイント
+        const p1 = pdfDoc.addPage([595.28, 841.89]);
+        drawA4Monthly(p1, font, year, month);
+
+        // 週間のループ処理ロジック (JavaのCalendar処理を再現)
+        let currDate = new Date(year, month - 1, 1);
+        let diff = currDate.getDay() - 1; // 月曜日からの差分
+        if (diff < 0) diff += 7;
+        currDate.setDate(currDate.getDate() - diff); // 週の月曜日に戻す
+
+        const endDate = new Date(year, month - 1, 1);
+        endDate.setMonth(endDate.getMonth() + 1);
+        endDate.setDate(0); // 月末日
+
+        let pIdx = 2;
+        while (currDate <= endDate || currDate.getMonth() === (month - 1)) {
+            const lp = pdfDoc.addPage([595.28, 841.89]);
+            drawA4Weekly(lp, font, new Date(currDate), month, pIdx, true);
+            pIdx++;
+
+            const rp = pdfDoc.addPage([595.28, 841.89]);
+            let rDate = new Date(currDate);
+            rDate.setDate(rDate.getDate() + 4); // 金曜日以降
+            drawA4Weekly(rp, font, rDate, month, pIdx, false);
+            pIdx++;
+
+            currDate.setDate(currDate.getDate() + 7);
+        }
+    }
+
+    function drawA4Monthly(page, font, year, month) {
+        const pageH = page.getHeight();
+        const ml = 65, mt = 100, uw = page.getWidth() - ml - 25;
+        const cw = uw / 7, ch = 85, sy = pageH - mt;
+
+        page.drawText(`${year}年 ${month}月 月間カレンダー (A4印刷用)`, { x: ml, y: sy + 40, size: 18, font: font, color: rgbColor(0,0,0) });
+
+        const days = ["月", "火", "水", "木", "金", "土", "日"];
+        for (let i = 0; i < 7; i++) {
+            let color = rgbColor(64,64,64);
+            if (i === 5) color = rgbColor(0,0,200);
+            else if (i === 6) color = rgbColor(200,0,0);
+            page.drawText(days[i], { x: ml + (i * cw) + (cw/2) - 6, y: sy + 15, size: 10, font: font, color: color });
+        }
+
+        const firstDay = new Date(year, month - 1, 1);
+        const maxDays = new Date(year, month, 0).getDate();
+        let gridStart = firstDay.getDay() - 1;
+        if (gridStart < 0) gridStart = 6;
+
+        let curGrid = 0, maxRow = 4;
+        for (let d = 1; d <= maxDays; d++) {
+            while (curGrid < gridStart) curGrid++;
+            const col = curGrid % 7;
+            const row = Math.floor(curGrid / 7);
+            if (row > maxRow) maxRow = row;
+
+            const cx = ml + (col * cw);
+            const cy = sy - ((row + 1) * ch);
+
+            const isHol = checkHoliday(year, month, d);
+            const wd = new Date(year, month - 1, d).getDay();
+
+            // 背景塗りつぶし
+            if (isHol || wd === 0) {
+                page.drawRectangle({ x: cx, y: cy, width: cw, height: ch, color: rgbColor(255,235,235) });
+            } else if (wd === 6) {
+                page.drawRectangle({ x: cx, y: cy, width: cw, height: ch, color: rgbColor(230,240,255) });
+            }
+
+            let numColor = rgbColor(0,0,0);
+            if (isHol || wd === 0) numColor = rgbColor(200,0,0);
+            else if (wd === 6) numColor = rgbColor(0,0,200);
+
+            page.drawText(String(d), { x: cx + 6, y: cy + ch - 15, size: 10, font: font, color: numColor });
+            curGrid++;
+        }
+
+        // 罫線
+        for (let r = 0; r <= maxRow + 1; r++) {
+            page.drawLine({ start: { x: ml, y: sy - (r * ch) }, end: { x: ml + (7 * cw), y: sy - (r * ch) }, color: rgbColor(200,200,200), thickness: 0.7 });
+        }
+        for (let c = 0; c <= 7; c++) {
+            page.drawLine({ start: { x: ml + (c * cw), y: sy }, end: { x: ml + (c * cw), y: sy - ((maxRow + 1) * ch) }, color: rgbColor(200,200,200), thickness: 0.7 });
+        }
+    }
+
+    function drawA4Weekly(page, font, cal, targetM, pNum, isLeft) {
+        const pageH = page.getHeight();
+        const ml = (pNum % 2 !== 0) ? 65 : 25, mr = (pNum % 2 !== 0) ? 25 : 65;
+        const sy = pageH - 60, uw = page.getWidth() - ml - mr;
+        const tw = isLeft ? 35 : 0, dw = (uw - tw) / 4, rh = 14;
+        const names = isLeft ? ["月","火","水","木"] : ["金","土","日","メモ"];
+        let currArr = [false, false, false, false];
+
+        let loopDate = new Date(cal);
+        for (let i = 0; i < 4; i++) {
+            const x = ml + tw + (i * dw);
+            if (!isLeft && i === 3) {
+                currArr[i] = true;
+                page.drawRectangle({ x: x, y: sy - 25, width: dw, height: 25, color: rgbColor(240,240,240) });
+                page.drawText("メモ", { x: x + 10, y: sy - 16, size: 9, font: font, color: rgbColor(0,0,0) });
+                continue;
+            }
+
+            const cM = (loopDate.getMonth() === targetM - 1);
+            currArr[i] = cM;
+
+            if (!cM) {
+                page.drawRectangle({ x: x, y: sy - 25, width: dw, height: 25, color: rgbColor(245,245,245) });
+            } else {
+                const h = checkHoliday(loopDate.getFullYear(), loopDate.getMonth() + 1, loopDate.getDate());
+                const wd = loopDate.getDay();
+                let bgColor = rgbColor(252,252,252);
+                if (h || wd === 0) bgColor = rgbColor(255,242,242);
+                else if (wd === 6) bgColor = rgbColor(242,248,255);
+
+                page.drawRectangle({ x: x, y: sy - 25, width: dw, height: 25, color: bgColor });
+
+                let textColor = rgbColor(0,0,0);
+                if (h || wd === 0) textColor = rgbColor(200,0,0);
+                else if (wd === 6) textColor = rgbColor(0,0,200);
+
+                const label = `${loopDate.getMonth() + 1}/${loopDate.getDate()} (${names[i]})`;
+                page.drawText(label, { x: x + 6, y: sy - 16, size: 9, font: font, color: textColor });
+            }
+            loopDate.setDate(loopDate.getDate() + 1);
+        }
+        drawLines(page, font, ml, uw, pageH - sy, rh, tw, dw, currArr);
+    }
+
+    // --- A3デジタル用生成 ---
+    async function createDigitalA3(pdfDoc, font, year, month) {
+        // A3サイズ横向き: 1190.55 x 841.89 ポイント
+        const w = 1190.55, h = 841.89;
+        const p1 = pdfDoc.addPage([w, h]);
+
+        const margin = 25, sy = h - 120, calW = (w / 2) - margin, cw = calW / 7, ch = 85;
+        page1Text = `${year}年 ${month}月 デジタルプランナー`;
+        p1.drawText(page1Text, { x: margin, y: h - 60, size: 22, font: font, color: rgbColor(0,0,0) });
+
+        const dHead = ["月","火","水","木","金","土","日"];
+        for (let i = 0; i < 7; i++) {
+            p1.drawText(dHead[i], { x: margin + (i * cw) + (cw/2) - 6, y: sy + 15, size: 10, font: font, color: rgbColor(64,64,64) });
+        }
+
+        const firstDay = new Date(year, month - 1, 1);
+        const maxDays = new Date(year, month, 0).getDate();
+        let start = firstDay.getDay() - 1;
+        if (start < 0) start = 6;
+
+        let cur = 0, maxR = 4;
+        for (let d = 1; d <= maxDays; d++) {
+            while (cur < start) cur++;
+            const c = cur % 7, r = Math.floor(cur / 7);
+            if (r > maxR) maxR = r;
+            const cx = margin + (c * cw), cy = sy - ((r + 1) * ch);
+
+            const isHol = checkHoliday(year, month, d);
+            const wd = new Date(year, month - 1, d).getDay();
+
+            if (isHol || wd === 0) {
+                p1.drawRectangle({ x: cx, y: cy, width: cw, height: ch, color: rgbColor(255,242,242) });
+            } else if (wd === 6) {
+                p1.drawRectangle({ x: cx, y: cy, width: cw, height: ch, color: rgbColor(242,248,255) });
+            }
+
+            let numColor = rgbColor(0,0,0);
+            if (isHol || wd === 0) numColor = rgbColor(220,50,50);
+            else if (wd === 6) numColor = rgbColor(50,50,220);
+
+            p1.drawText(String(d), { x: cx + 8, y: cy + ch - 18, size: 11, font: font, color: numColor });
+            cur++;
+        }
+
+        for (let r = 0; r <= maxR + 1; r++) {
+            p1.drawLine({ start: { x: margin, y: sy - (r * ch) }, end: { x: margin + (7 * cw), y: sy - (r * ch) }, color: rgbColor(180,180,180), thickness: 0.8 });
+        }
+        for (let c = 0; c <= 7; c++) {
+            p1.drawLine({ start: { x: margin + (c * cw), y: sy }, end: { x: margin + (c * cw), y: sy - ((maxR + 1) * ch) }, color: rgbColor(180,180,180), thickness: 0.8 });
+        }
+
+        // 週間のループ処理ロジック (A3)
+        let currDate = new Date(year, month - 1, 1);
+        let diff = currDate.getDay() - 1;
+        if (diff < 0) diff += 7;
+        currDate.setDate(currDate.getDate() - diff);
+
+        const endDate = new Date(year, month - 1, 1);
+        endDate.setMonth(endDate.getMonth() + 1);
+        endDate.setDate(0);
+
+        while (currDate <= endDate || currDate.getMonth() === (month - 1)) {
+            const wp = pdfDoc.addPage([w, h]);
+            const m = 25, wsy = h - 60, tw = 35, dw = (w - (m * 2) - tw) / 8, rh = 14;
+            let cArr = [false, false, false, false, false, false, false, false];
+
+            let loopDate = new Date(currDate);
+            for (let i = 0; i < 8; i++) {
+                const x = m + tw + (i * dw);
+                if (i === 7) {
+                    cArr[i] = true;
+                    wp.drawRectangle({ x: x, y: wsy - 25, width: dw, height: 25, color: rgbColor(235,240,245) });
+                    wp.drawText("NOTES", { x: x + 15, y: wsy - 17, size: 10, font: font, color: rgbColor(50,70,90) });
+                    continue;
+                }
+
+                const cM = (loopDate.getMonth() === month - 1);
+                cArr[i] = cM;
+
+                if (!cM) {
+                    wp.drawRectangle({ x: x, y: wsy - 25, width: dw, height: 25, color: rgbColor(245,245,245) });
+                } else {
+                    const hld = checkHoliday(loopDate.getFullYear(), loopDate.getMonth() + 1, loopDate.getDate());
+                    const wd = loopDate.getDay();
+                    let bgColor = rgbColor(252,252,252);
+                    if (hld || wd === 0) bgColor = rgbColor(255,242,242);
+                    else if (wd === 6) bgColor = rgbColor(242,248,255);
+
+                    wp.drawRectangle({ x: x, y: wsy - 25, width: dw, height: 25, color: bgColor });
+
+                    let textColor = rgbColor(0,0,0);
+                    if (hld || wd === 0) textColor = rgbColor(220,50,50);
+                    else if (wd === 6) textColor = rgbColor(50,50,220);
+
+                    const label = `${loopDate.getMonth() + 1}/${loopDate.getDate()}`;
+                    wp.drawText(label, { x: x + 8, y: wsy - 17, size: 11, font: font, color: textColor });
+                }
+                loopDate.setDate(loopDate.getDate() + 1);
+            }
+            drawLines(wp, font, m, w - (m * 2), h - wsy, rh, tw, dw, cArr);
+            currDate.setDate(currDate.getDate() + 7);
+        }
     }
 </script>
 </body>
