@@ -12,6 +12,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URI;
@@ -135,11 +136,34 @@ public class Main extends JFrame {
     }
 
     private PDType0Font getFont(PDDocument doc) throws Exception {
-        // Windows環境用
+        // 【最優先】プロジェクト内のリソースフォルダ(msgothic.ttc)から読み込む（GitHub Actions環境対策）
+        try (InputStream fontStream = Main.class.getClassLoader().getResourceAsStream("msgothic.ttc")) {
+            if (fontStream != null) {
+                // InputStreamを一時ファイルに書き出す、またはTrueTypeCollectionへ直接ストリームとして渡す
+                // PDFBox 3.x では、TTCリソースから特定のフォントを抽出するために一時的にファイルへ落とすのが最も安定します
+                File tempFontFile = File.createTempFile("msgothic", ".ttc");
+                tempFontFile.deleteOnExit();
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(tempFontFile)) {
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = fontStream.read(buffer)) != -1) {
+                        out.write(buffer, 0, bytesRead);
+                    }
+                }
+                TrueTypeCollection ttc = new TrueTypeCollection(tempFontFile);
+                TrueTypeFont ttf = ttc.getFontByName("MS-Gothic");
+                if (ttf == null) ttf = ttc.getFontByName("MS-Gothic-Regular");
+                if (ttf != null) {
+                    return PDType0Font.load(doc, ttf, true);
+                }
+            }
+        } catch (Exception ignored) {
+            // リソースからの読み込みに失敗した場合は、以下のローカルフォント探索にフォールバックします
+        }
+
+        // ローカル環境用のフォールバック設定
         File f = new File("C:/Windows/Fonts/msgothic.ttc");
-        // Mac環境用
         if (!f.exists()) f = new File("/System/Library/Fonts/Hinted/MS-Gothic.ttf");
-        // Linux(GitHub Actionsのサーバー環境用)のフォント対策
         if (!f.exists()) f = new File("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
 
         if (f.exists() && f.getName().endsWith(".ttc")) {
