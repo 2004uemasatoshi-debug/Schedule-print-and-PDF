@@ -391,6 +391,8 @@ public class Main extends JFrame {
     }
 
     public static void main(String[] args) {
+        // 💡 この下の1行を、mainメソッドの一番最初に追加します！
+        System.setProperty("java.awt.headless", "true");
         // もしGitHub Actionsから「年」「月」「タイプ」が送られてきたら、画面を出さずに直接PDFを作る
         if (args.length >= 3) {
             try {
