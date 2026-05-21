@@ -391,8 +391,10 @@ public class Main extends JFrame {
     }
 
     public static void main(String[] args) {
-        // 💡 この下の1行を、mainメソッドの一番最初に追加します！
+        // 💡 完全に一番最初、何よりも前にこれを配置します！
+        // これにより、この後に画面部品が作られても「画面がない環境だよ」とJavaが事前に納得してスルーしてくれます。
         System.setProperty("java.awt.headless", "true");
+
         // もしGitHub Actionsから「年」「月」「タイプ」が送られてきたら、画面を出さずに直接PDFを作る
         if (args.length >= 3) {
             try {
@@ -405,6 +407,13 @@ public class Main extends JFrame {
                 System.out.println("引数不正のため、通常起動にフォールバックします。");
             }
         }
+
+        // 引数がない(あなたのPCで普通に動かした)場合は、これまで通りデスクトップ画面を起動
+        SwingUtilities.invokeLater(() -> {
+            try { UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName()); } catch (Exception ignored) {}
+            new Main().setVisible(true);
+        });
+    }
 
         // 引数がない(あなたのPCで普通に動かした)場合は、これまで通りデスクトップ画面を起動
         SwingUtilities.invokeLater(() -> {
