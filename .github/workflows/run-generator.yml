@@ -1,0 +1,47 @@
+name: Generate Planner PDF
+
+on:
+  workflow_dispatch:
+    inputs:
+      year:
+        description: '対象の年 (Year)'
+        required: true
+        default: '2026'
+      month:
+        description: '対象の月 (Month)'
+        required: true
+        default: '5'
+      type:
+        description: '形式 (Layout Type)'
+        required: true
+        default: 'A4_Print'
+        type: choice
+        options:
+          - A4_Print
+          - A3_Digital
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'maven'
+
+      - name: Generate PDF via Java
+        run: |
+          # Mavenコマンドを使って、ブラウザの入力値をJavaに渡して実行
+          mvn compile exec:java -Dexec.mainClass="org.example.Main" -Dexec.args="${{ github.event.inputs.year }} ${{ github.event.inputs.month }} ${{ github.event.inputs.type }}"
+
+      - name: Upload PDF Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.type }}-${{ github.event.inputs.year }}年${{ github.event.inputs.month }}月
+          path: "*.pdf"
+          retention-days: 7
