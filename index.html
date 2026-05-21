@@ -104,8 +104,9 @@
             status.innerText = "PDF生成中...";
             const pdfDoc = await PDFLib.PDFDocument.create();
             pdfDoc.registerFontkit(fontkit);
-            // TTCファイルからフォントをインベッド
-            const customFont = await pdfDoc.embedFont(fontBytes, { subset: true });
+
+// 💡 オプションを消して、シンプルにバイトデータだけを渡します
+            const customFont = await pdfDoc.embedFont(fontBytes);
 
             let fileName = "";
             if (layout === "A4_Print") {
