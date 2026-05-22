@@ -94,7 +94,7 @@
             await fetchHolidays();
 
             status.innerText = "フォントを読込中...";
-            // 同じ階層に配置した msgothic.ttc をブラウザが直接ロードします！
+            // 同じ階層に配置した msgothic.ttf をブラウザが直接ロードします！
             const fontUrl = './src/main/resources/msgothic.ttc';
             const fontBytes = await fetch(fontUrl).then(res => {
                 if(!res.ok) throw new Error("フォントファイルが見つかりません。パスを確認してください。");
